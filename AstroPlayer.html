@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AstroPlayer</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --gold: #FFD700;
+  --gold2: #FF8C00;
+  --bg: #000;
+  --ctrl-bg: rgba(15,15,25,0.85);
+  --ctrl-border: rgba(255,215,0,0.18);
+  --ctrl-hover: rgba(255,215,0,0.15);
+  --ctrl-active: rgba(255,215,0,0.35);
+  --text: #fff;
+  --text2: rgba(255,255,255,0.65);
+  --radius: 10px;
+  --transition: 0.18s cubic-bezier(0.4,0,0.2,1);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  font-family: 'Rajdhani', sans-serif;
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ═══════════════════════════════════════════════
+   PLAYER WRAPPER
+═══════════════════════════════════════════════ */
+#player-wrap {
+  position: relative;
+  width: 100vw; height: 100vh;
+  background: #000;
+  overflow: hidden;
+}
+
+/* El video nativo */
+#ap-video {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: none;
+  z-index: 1;
+}
+#ap-video.active { display: block; }
+
+/* El iframe embed */
+#ap-iframe {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  border: none;
+  display: none;
+  z-index: 1;
+  background: #000;
+}
+#ap-iframe.active { display: block; }
+
+/* ═══════════════════════════════════════════════
+   OVERLAY DE CONTROLES
+═══════════════════════════════════════════════ */
+#ap-overlay {
+  position: absolute; inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: linear-gradient(
+    to bottom,
+    rgba(0,0,0,0.75) 0%,
+    transparent 22%,
+    transparent 65%,
+    rgba(0,0,0,0.85) 100%
+  );
+  opacity: 1;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+#ap-overlay.hidden { opacity: 0; }
+#ap-overlay > * { pointer-events: all; }
+
+/* ─── TOP BAR ─── */
+#ap-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 28px 16px;
+}
+
+#ap-back {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  color: #fff;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 15px; font-weight: 600; letter-spacing: 0.04em;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  flex-shrink: 0;
+}
+#ap-back:hover, #ap-back:focus {
+  background: var(--ctrl-hover);
+  border-color: var(--gold);
+  outline: none;
+}
+#ap-back svg { flex-shrink: 0; }
+
+#ap-title-wrap { flex: 1; min-width: 0; }
+#ap-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px; letter-spacing: 0.08em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+#ap-ep-label {
+  font-size: 13px; color: var(--text2); letter-spacing: 0.05em;
+  margin-top: 1px;
+}
+
+#ap-badge {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+  border: 1.5px solid rgba(255,255,255,0.4);
+  border-radius: 5px;
+  padding: 3px 9px;
+  color: rgba(255,255,255,0.85);
+  flex-shrink: 0;
+}
+
+/* ─── CENTER PLAY INDICATOR ─── */
+#ap-center-icon {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  width: 80px; height: 80px;
+  background: rgba(255,215,0,0.18);
+  border: 2.5px solid var(--gold);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+  transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s;
+  opacity: 0;
+}
+#ap-center-icon.pop {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+#ap-center-icon svg { filter: drop-shadow(0 0 6px var(--gold)); }
+
+/* ─── BUFFER SPINNER ─── */
+#ap-spinner {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 15;
+  display: none;
+  pointer-events: none;
+}
+#ap-spinner.show { display: block; }
+#ap-spinner svg {
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─── SKIP INTRO ─── */
+#ap-skip {
+  position: absolute;
+  right: 32px; bottom: 140px;
+  background: rgba(20,20,30,0.92);
+  border: 1.5px solid var(--gold);
+  border-radius: 8px;
+  color: var(--gold);
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 10px 22px;
+  cursor: pointer;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.3s, background var(--transition);
+  z-index: 20;
+}
+#ap-skip.visible { opacity: 1; pointer-events: all; }
+#ap-skip:hover, #ap-skip:focus { background: var(--ctrl-active); outline: none; }
+
+/* ─── NEXT EPISODE OVERLAY ─── */
+#ap-next-overlay {
+  position: absolute;
+  right: 28px; bottom: 130px;
+  width: 280px;
+  background: rgba(10,10,20,0.95);
+  border: 1.5px solid var(--ctrl-border);
+  border-radius: 12px;
+  padding: 14px;
+  display: none; flex-direction: column; gap: 10px;
+  z-index: 25;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+}
+#ap-next-overlay.show { display: flex; }
+#ap-next-overlay img {
+  width: 100%; height: 100px;
+  object-fit: cover; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.neo-label { font-size: 11px; color: var(--gold); letter-spacing: 0.1em; font-weight: 700; }
+.neo-title { font-size: 15px; font-weight: 700; }
+.neo-ep-label { font-size: 12px; color: var(--text2); }
+.neo-progress { height: 3px; background: rgba(255,255,255,0.15); border-radius: 2px; overflow: hidden; }
+.neo-progress-fill { height: 100%; background: var(--gold); transition: width 1s linear; }
+#ap-next-btn {
+  background: var(--gold);
+  color: #000;
+  border: none; border-radius: 7px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px; font-weight: 700; letter-spacing: 0.05em;
+  padding: 8px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: background var(--transition);
+}
+#ap-next-btn:hover, #ap-next-btn:focus { background: #ffbe00; outline: none; }
+
+/* ─── TOAST ─── */
+#ap-toast {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(10,10,20,0.92);
+  border: 1px solid var(--ctrl-border);
+  border-radius: 10px;
+  padding: 12px 28px;
+  font-size: 15px; font-weight: 600; letter-spacing: 0.05em;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 30;
+  white-space: nowrap;
+  transition: opacity 0.25s;
+  backdrop-filter: blur(8px);
+}
+#ap-toast.show { opacity: 1; }
+
+/* ─── VOLUME TOAST ─── */
+#ap-vol-toast {
+  position: absolute;
+  top: 28px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10,10,20,0.92);
+  border: 1px solid var(--ctrl-border);
+  border-radius: 10px;
+  padding: 10px 20px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 30;
+  transition: opacity 0.25s;
+  backdrop-filter: blur(8px);
+}
+#ap-vol-toast.show { opacity: 1; }
+#ap-vol-bar { width: 90px; height: 4px; background: rgba(255,255,255,0.15); border-radius: 2px; overflow: hidden; }
+#ap-vol-fill { height: 100%; background: var(--gold); border-radius: 2px; transition: width 0.15s; }
+
+/* ─── BOTTOM CONTROLS ─── */
+#ap-bottom {
+  padding: 12px 28px 24px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* Progress bar */
+#ap-progress-wrap {
+  display: flex; align-items: center; gap: 12px;
+}
+#ap-time-cur, #ap-time-dur {
+  font-size: 14px; font-weight: 600; letter-spacing: 0.03em;
+  color: var(--text2); min-width: 42px; flex-shrink: 0;
+}
+#ap-time-dur { text-align: right; }
+#ap-progress {
+  flex: 1; height: 5px;
+  background: rgba(255,255,255,0.18);
+  border-radius: 3px;
+  position: relative;
+  cursor: pointer;
+  transition: height var(--transition);
+}
+#ap-progress:hover { height: 8px; }
+#ap-progress-buf {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: rgba(255,255,255,0.25);
+  border-radius: 3px;
+  pointer-events: none;
+  width: 0%;
+}
+#ap-progress-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, var(--gold2), var(--gold));
+  border-radius: 3px;
+  pointer-events: none;
+  width: 0%;
+}
+#ap-progress-thumb {
+  position: absolute; right: -7px; top: 50%;
+  transform: translateY(-50%) scale(0);
+  width: 14px; height: 14px;
+  background: var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255,215,0,0.6);
+  transition: transform var(--transition);
+  pointer-events: none;
+}
+#ap-progress:hover #ap-progress-thumb { transform: translateY(-50%) scale(1); }
+
+/* Botones de control */
+#ap-btns {
+  display: flex; align-items: center; gap: 6px;
+}
+
+.ap-btn {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius);
+  color: #fff;
+  width: 46px; height: 46px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+  flex-shrink: 0;
+  position: relative;
+}
+.ap-btn:hover, .ap-btn:focus {
+  background: var(--ctrl-hover);
+  border-color: var(--gold);
+  outline: none;
+  transform: scale(1.08);
+}
+.ap-btn:active { transform: scale(0.94); }
+.ap-btn.active {
+  background: var(--ctrl-active);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.ap-btn.play-btn {
+  width: 56px; height: 56px;
+  background: var(--gold);
+  border: none;
+  color: #000;
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(255,215,0,0.35);
+}
+.ap-btn.play-btn:hover, .ap-btn.play-btn:focus {
+  background: #ffbe00;
+  box-shadow: 0 0 28px rgba(255,215,0,0.55);
+  transform: scale(1.1);
+  border-color: transparent;
+}
+
+.ap-btn-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.05em;
+  position: absolute; bottom: -14px; left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap; color: var(--text2);
+  pointer-events: none;
+  opacity: 0; transition: opacity var(--transition);
+}
+.ap-btn:hover .ap-btn-label, .ap-btn:focus .ap-btn-label { opacity: 1; }
+
+#ap-spacer { flex: 1; }
+
+/* Vol slider */
+#ap-vol-wrap {
+  display: flex; align-items: center; gap: 8px;
+}
+#ap-vol-slider {
+  width: 0; overflow: hidden;
+  transition: width 0.3s ease;
+  display: flex; align-items: center;
+}
+#ap-vol-wrap:hover #ap-vol-slider,
+#ap-vol-wrap:focus-within #ap-vol-slider {
+  width: 80px;
+}
+input[type=range]#ap-vol-range {
+  -webkit-appearance: none;
+  width: 80px; height: 4px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 2px; outline: none; cursor: pointer;
+}
+input[type=range]#ap-vol-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  background: var(--gold); border-radius: 50%;
+  cursor: pointer;
+}
+
+/* Episode Panel */
+#ap-ep-panel {
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: 320px;
+  background: rgba(8,8,18,0.97);
+  border-left: 1px solid var(--ctrl-border);
+  backdrop-filter: blur(20px);
+  z-index: 40;
+  display: flex; flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+  overflow: hidden;
+}
+#ap-ep-panel.open { transform: translateX(0); }
+
+#ap-ep-panel-header {
+  padding: 20px 18px 12px;
+  border-bottom: 1px solid var(--ctrl-border);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+#ap-ep-panel-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 0.08em;
+}
+
+/* Season tabs */
+#ap-season-tabs {
+  display: flex; gap: 6px; padding: 10px 18px 6px;
+  overflow-x: auto; flex-shrink: 0;
+}
+#ap-season-tabs::-webkit-scrollbar { display: none; }
+.ap-season-tab {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.05);
+  color: var(--text2);
+  font-size: 13px; font-weight: 600; letter-spacing: 0.04em;
+  cursor: pointer; white-space: nowrap;
+  transition: all var(--transition);
+}
+.ap-season-tab:hover,.ap-season-tab.active {
+  border-color: var(--gold); color: var(--gold);
+  background: rgba(255,215,0,0.1);
+}
+
+#ap-ep-list {
+  flex: 1; overflow-y: auto; padding: 8px 0;
+}
+#ap-ep-list::-webkit-scrollbar { width: 3px; }
+#ap-ep-list::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.3); border-radius: 2px; }
+
+.ap-ep-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 18px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: background var(--transition), border-color var(--transition);
+}
+.ap-ep-item:hover, .ap-ep-item:focus {
+  background: rgba(255,215,0,0.07);
+  outline: none;
+}
+.ap-ep-item.current { border-left-color: var(--gold); background: rgba(255,215,0,0.05); }
+.ap-ep-item.has-url { }
+.ap-ep-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px; color: var(--text2);
+  min-width: 28px; text-align: center; flex-shrink: 0;
+}
+.ap-ep-item.current .ap-ep-num { color: var(--gold); }
+.ap-ep-thumb {
+  width: 70px; height: 42px; object-fit: cover;
+  border-radius: 5px; flex-shrink: 0;
+  background: rgba(255,255,255,0.05);
+}
+.ap-ep-info { flex: 1; min-width: 0; }
+.ap-ep-name {
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ap-ep-dur { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.ap-ep-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold); flex-shrink: 0;
+  box-shadow: 0 0 6px var(--gold);
+}
+
+/* Close panel button */
+.ap-panel-close {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 7px;
+  color: #fff; font-size: 16px;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background var(--transition);
+}
+.ap-panel-close:hover { background: rgba(255,255,255,0.15); }
+
+/* ─── ERROR SCREEN ─── */
+#ap-error {
+  position: absolute; inset: 0;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center; gap: 18px;
+  z-index: 50; text-align: center; padding: 40px;
+}
+#ap-error.show { display: flex; }
+#ap-error svg { opacity: 0.4; }
+#ap-error h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 28px; letter-spacing: 0.1em; color: var(--gold);
+}
+#ap-error p { font-size: 15px; color: var(--text2); max-width: 400px; line-height: 1.6; }
+#ap-error-retry {
+  background: var(--gold); color: #000;
+  border: none; border-radius: 8px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: 0.06em;
+  padding: 11px 28px; cursor: pointer;
+  transition: background var(--transition);
+}
+#ap-error-retry:hover { background: #ffbe00; }
+
+/* ─── LOADING SCREEN ─── */
+#ap-loading {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  z-index: 45; background: #000;
+}
+#ap-loading.hide { display: none; }
+#ap-loading-ring {
+  width: 60px; height: 60px;
+  border: 3px solid rgba(255,215,0,0.15);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+#ap-loading p { font-size: 14px; color: var(--text2); letter-spacing: 0.05em; }
+
+/* ─── FOCUS outline para TV ─── */
+:focus-visible {
+  outline: 2.5px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* ─── RESPONSIVE: TV 4K / grande ─── */
+@media (min-width: 1920px) {
+  #ap-title { font-size: 28px; }
+  .ap-btn { width: 54px; height: 54px; }
+  .ap-btn.play-btn { width: 66px; height: 66px; }
+  #ap-progress { height: 6px; }
+  #ap-ep-panel { width: 380px; }
+}
+@media (max-width: 600px) {
+  #ap-top, #ap-bottom { padding-left: 14px; padding-right: 14px; }
+  #ap-title { font-size: 16px; }
+  .ap-btn { width: 40px; height: 40px; }
+  .ap-btn.play-btn { width: 50px; height: 50px; }
+}
+</style>
+</head>
+<body>
+
+<div id="player-wrap">
+
+  <!-- VIDEO y IFRAME -->
+  <video id="ap-video" crossorigin="anonymous" playsinline preload="metadata"></video>
+  <iframe id="ap-iframe" allowfullscreen allow="autoplay; fullscreen; encrypted-media"></iframe>
+
+  <!-- LOADING -->
+  <div id="ap-loading">
+    <div id="ap-loading-ring"></div>
+    <p>Cargando...</p>
+  </div>
+
+  <!-- ERROR -->
+  <div id="ap-error">
+    <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+    <h2>Error al reproducir</h2>
+    <p id="ap-error-msg">No se pudo cargar el video. Verifica que la URL sea válida y accesible.</p>
+    <button id="ap-error-retry">Reintentar</button>
+  </div>
+
+  <!-- BUFFER SPINNER -->
+  <div id="ap-spinner">
+    <svg width="50" height="50" viewBox="0 0 50 50" fill="none" stroke="var(--gold)" stroke-width="3.5">
+      <circle cx="25" cy="25" r="20" stroke-dasharray="94" stroke-dashoffset="70" stroke-linecap="round"/>
+    </svg>
+  </div>
+
+  <!-- CENTER ICON (pop on play/pause) -->
+  <div id="ap-center-icon">
+    <svg id="ap-center-svg" viewBox="0 0 24 24" width="32" height="32" fill="var(--gold)">
+      <path d="M5 3l14 9-14 9V3z"/>
+    </svg>
+  </div>
+
+  <!-- OVERLAY -->
+  <div id="ap-overlay">
+    <!-- TOP -->
+    <div id="ap-top">
+      <button id="ap-back" tabindex="0">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Salir
+      </button>
+      <div id="ap-title-wrap">
+        <div id="ap-title">—</div>
+        <div id="ap-ep-label"></div>
+      </div>
+      <div id="ap-badge">HD</div>
+    </div>
+
+    <!-- BOTTOM -->
+    <div id="ap-bottom">
+      <!-- Progress -->
+      <div id="ap-progress-wrap">
+        <span id="ap-time-cur">0:00</span>
+        <div id="ap-progress" tabindex="0">
+          <div id="ap-progress-buf"></div>
+          <div id="ap-progress-fill">
+            <div id="ap-progress-thumb"></div>
+          </div>
+        </div>
+        <span id="ap-time-dur">0:00</span>
+      </div>
+      <!-- Buttons -->
+      <div id="ap-btns">
+        <!-- Play/Pause -->
+        <button class="ap-btn play-btn" id="ap-play" tabindex="0" title="Play/Pausa [Space]">
+          <svg id="ap-play-icon" viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+            <path d="M5 3l14 9-14 9V3z"/>
+          </svg>
+          <span class="ap-btn-label">Play</span>
+        </button>
+        <!-- Rewind 10s -->
+        <button class="ap-btn" id="ap-rw" tabindex="0" title="Retroceder 10s [←]">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M12.5 3a9.5 9.5 0 1 0 9.5 9.5H20a8 8 0 1 1-8-8V7.5l-5-4 5-4V3z"/>
+            <text x="8.5" y="15.5" font-size="5.5" fill="currentColor" font-family="sans-serif" font-weight="700">10</text>
+          </svg>
+          <span class="ap-btn-label">-10s</span>
+        </button>
+        <!-- FF 10s -->
+        <button class="ap-btn" id="ap-ff" tabindex="0" title="Adelantar 10s [→]">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M11.5 3a9.5 9.5 0 1 1-9.5 9.5H4a8 8 0 1 0 8-8V7.5l5-4-5-4V3z"/>
+            <text x="9.5" y="15.5" font-size="5.5" fill="currentColor" font-family="sans-serif" font-weight="700">10</text>
+          </svg>
+          <span class="ap-btn-label">+10s</span>
+        </button>
+        <!-- Siguiente episodio -->
+        <button class="ap-btn" id="ap-next-ep" tabindex="0" title="Siguiente episodio [N]" style="display:none">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M5 5l10 7-10 7V5zM19 5v14h2V5h-2z"/>
+          </svg>
+          <span class="ap-btn-label">Siguiente</span>
+        </button>
+        <!-- Mute -->
+        <div id="ap-vol-wrap">
+          <button class="ap-btn" id="ap-mute" tabindex="0" title="Mute [M]">
+            <svg id="ap-vol-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M11 5L6 9H2v6h4l5 4V5zm5.54 3.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+            </svg>
+            <span class="ap-btn-label">Mute</span>
+          </button>
+          <div id="ap-vol-slider">
+            <input type="range" id="ap-vol-range" min="0" max="100" value="80" tabindex="0">
+          </div>
+        </div>
+
+        <div id="ap-spacer"></div>
+
+        <!-- Episodios (solo TV/Anime) -->
+        <button class="ap-btn" id="ap-ep-toggle" tabindex="0" title="Episodios [E]" style="display:none">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M4 6h16M4 12h16M4 18h10"/>
+          </svg>
+          <span class="ap-btn-label">Episodios</span>
+        </button>
+        <!-- Subtítulos -->
+        <button class="ap-btn" id="ap-subs" tabindex="0" title="Subtítulos [S]">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="2" y="4" width="20" height="16" rx="2"/>
+            <path d="M6 12h4M12 12h6M6 16h2M10 16h4M16 16h2"/>
+          </svg>
+          <span class="ap-btn-label">Subs</span>
+        </button>
+        <!-- Fullscreen -->
+        <button class="ap-btn" id="ap-fs" tabindex="0" title="Pantalla completa [F]">
+          <svg id="ap-fs-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+          <span class="ap-btn-label">Full</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SKIP INTRO -->
+  <button id="ap-skip" tabindex="0">Omitir intro →</button>
+
+  <!-- NEXT EP OVERLAY -->
+  <div id="ap-next-overlay">
+    <img id="ap-next-thumb" src="" alt="">
+    <div>
+      <div class="neo-label">SIGUIENTE EPISODIO</div>
+      <div class="neo-title" id="ap-next-title">—</div>
+      <div class="neo-ep-label" id="ap-next-ep-label"></div>
+    </div>
+    <div class="neo-progress"><div class="neo-progress-fill" id="ap-neo-fill" style="width:100%"></div></div>
+    <button id="ap-next-btn" tabindex="0">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M5 5l10 7-10 7V5zM19 5v14h2V5h-2z"/></svg>
+      Ver ahora
+    </button>
+  </div>
+
+  <!-- VOLUME TOAST -->
+  <div id="ap-vol-toast">
+    <span id="ap-vol-icon2">🔊</span>
+    <div id="ap-vol-bar"><div id="ap-vol-fill"></div></div>
+    <span id="ap-vol-pct">80%</span>
+  </div>
+
+  <!-- TOAST -->
+  <div id="ap-toast"></div>
+
+  <!-- EPISODE PANEL -->
+  <div id="ap-ep-panel">
+    <div id="ap-ep-panel-header">
+      <div id="ap-ep-panel-title">EPISODIOS</div>
+      <button class="ap-panel-close" id="ap-ep-close">✕</button>
+    </div>
+    <div id="ap-season-tabs"></div>
+    <div id="ap-ep-list"></div>
+  </div>
+
+</div><!-- /#player-wrap -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// ASTRO PLAYER v1.0 — Player externo para AstroMovie
+// Recibe parámetros via URL o postMessage desde la app principal
+// ═══════════════════════════════════════════════════════════════
+
+// ─── ESTADO ───────────────────────────────────────────────────
+let state = {
+  url: '',
+  title: '',
+  epLabel: '',
+  badge: 'HD',
+  mediaType: 'movie',     // 'movie' | 'tv' | 'anime'
+  season: 1,
+  episode: 1,
+  seasonsMap: null,       // { "1": { "1": "url", "2": "url" }, ... }
+  episodes: [],           // lista de episodios de la temporada actual (TMDB)
+  epIdx: 0,
+  tmdbId: null,
+  isIframe: false,
+};
+let volume = 0.8;
+let isMuted = false;
+let hlsInstance = null;
+let hideTimer = null;
+let overlayVisible = true;
+let isPlaying = false;
+let skipShown = false;
+let neoTimer = null;
+let neoCountdown = 12;
+let isSeeking = false;
+let retryUrl = '';
+
+// ─── ELEMENTOS ────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const vid = $('ap-video');
+const ifr = $('ap-iframe');
+const overlay = $('ap-overlay');
+const wrap = $('player-wrap');
+
+// ═══════════════════════════════════════════════════════════════
+// INICIALIZACIÓN — leer parámetros de URL
+// ═══════════════════════════════════════════════════════════════
+function init(){
+  const p = new URLSearchParams(location.search);
+
+  state.url        = decodeURIComponent(p.get('url') || '');
+  state.title      = decodeURIComponent(p.get('title') || 'Sin título');
+  state.epLabel    = decodeURIComponent(p.get('ep') || '');
+  state.badge      = p.get('badge') || 'HD';
+  state.mediaType  = p.get('type') || 'movie';
+  state.season     = parseInt(p.get('s') || '1');
+  state.episode    = parseInt(p.get('e') || '1');
+  state.epIdx      = parseInt(p.get('idx') || '0');
+  state.tmdbId     = p.get('id') || null;
+
+  // seasonsMap puede venir como JSON encoded
+  try {
+    const sm = p.get('map');
+    if(sm) state.seasonsMap = JSON.parse(decodeURIComponent(sm));
+  } catch(e) {}
+
+  // También escuchar postMessage desde la app padre
+  window.addEventListener('message', onMessage);
+
+  $('ap-title').textContent = state.title;
+  $('ap-ep-label').textContent = state.epLabel;
+  $('ap-badge').textContent = state.badge;
+
+  const isTv = state.mediaType === 'tv' || state.mediaType === 'anime';
+  if(isTv){
+    $('ap-ep-toggle').style.display = 'flex';
+    $('ap-next-ep').style.display = 'flex';
+    loadEpPanel();
+  }
+
+  if(state.url) loadMedia(state.url);
+  else showError('No se especificó ninguna URL de video.');
+
+  setupControls();
+  setupKeyboard();
+  showOverlay();
+}
+
+// ─── POSTMESSAGE (comunicación con app padre) ──────────────────
+function onMessage(e){
+  const d = e.data;
+  if(!d || typeof d !== 'object') return;
+  if(d.type === 'ASTRO_PLAY'){
+    Object.assign(state, d.payload || {});
+    $('ap-title').textContent = state.title || '—';
+    $('ap-ep-label').textContent = state.epLabel || '';
+    const isTv = state.mediaType === 'tv' || state.mediaType === 'anime';
+    $('ap-ep-toggle').style.display = isTv ? 'flex' : 'none';
+    $('ap-next-ep').style.display = isTv ? 'flex' : 'none';
+    if(isTv) loadEpPanel();
+    loadMedia(state.url);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MEDIA LOADING
+// ═══════════════════════════════════════════════════════════════
+function isHLS(url){
+  if(!url) return false;
+  const u = url.toLowerCase();
+  return u.includes('.m3u8') || u.includes('/m3u8/') || u.includes('zilla-networks.com');
+}
+
+function isDirectVideo(url){
+  if(!url) return false;
+  const u = url.toLowerCase();
+  if(/\.(mp4|m3u8|mkv|webm|ogg|mov|avi|ts|flv)(\?|$|#|&)/.test(u)) return true;
+  if(u.includes('.mp4') || u.includes('.m3u8') || u.includes('.mkv') || u.includes('.webm')) return true;
+  if(u.includes('zilla-networks.com')) return true;
+  if(u.includes('/m3u8/')) return true;
+  // Hash largo típico de streams directos
+  if(!/youtube|vidsrc|vimeo|streamtape|dood|mixdrop|filemoon/.test(u) &&
+     /\/[a-f0-9]{16,}/.test(u.split('?')[0])) return true;
+  return false;
+}
+
+function loadMedia(url){
+  if(!url || !url.trim()){
+    showError('URL vacía. Asegúrate de haber configurado la URL en el catálogo.');
+    return;
+  }
+  url = url.trim();
+  retryUrl = url;
+
+  showLoading();
+  hideError();
+
+  // Limpiar estado anterior
+  stopHLS();
+  vid.pause();
+  vid.removeAttribute('src');
+  vid.load();
+  vid.classList.remove('active');
+  ifr.src = '';
+  ifr.classList.remove('active');
+
+  console.log('[AstroPlayer] Cargando:', url);
+
+  if(isDirectVideo(url)){
+    loadNative(url);
+  } else {
+    loadIframe(url);
+  }
+}
+
+function loadNative(url){
+  vid.classList.add('active');
+  vid.volume = volume;
+  vid.muted = isMuted;
+
+  if(isHLS(url)){
+    if(typeof Hls !== 'undefined' && Hls.isSupported()){
+      const hls = new Hls({
+        enableWorker: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        startLevel: -1,
+      });
+      hlsInstance = hls;
+      hls.loadSource(url);
+      hls.attachMedia(vid);
+      hls.on(Hls.Events.MANIFEST_PARSED, ()=>{
+        hideLoading();
+        vid.play().catch(()=>{ setPlayIcon(false); });
+      });
+      hls.on(Hls.Events.ERROR, (ev, data)=>{
+        console.error('[HLS]', data.type, data.details);
+        if(data.fatal){
+          if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
+            showError('Error de red. Verifica que la URL del video sea accesible desde este dispositivo.');
+          } else if(data.type === Hls.ErrorTypes.MEDIA_ERROR){
+            hls.recoverMediaError();
+          } else {
+            showError('Error al reproducir el stream HLS.');
+          }
+        }
+      });
+    } else if(vid.canPlayType('application/vnd.apple.mpegurl')){
+      // Safari — HLS nativo
+      vid.src = url;
+      vid.play().catch(()=>{ setPlayIcon(false); });
+      hideLoading();
+    } else {
+      showError('Tu dispositivo no soporta HLS. Usa un navegador Chromium.');
+    }
+  } else {
+    // MP4 u otro formato directo
+    vid.src = url;
+    vid.onerror = ()=>{
+      const code = vid.error ? vid.error.code : '?';
+      showError(`No se pudo cargar el archivo de video (código ${code}). Verifica que la URL sea un MP4 válido y accesible.`);
+    };
+    vid.play().catch(()=>{ setPlayIcon(false); });
+    hideLoading();
+  }
+
+  bindVideoEvents();
+}
+
+function loadIframe(url){
+  hideLoading();
+  ifr.src = url;
+  ifr.classList.add('active');
+  // En modo iframe no podemos controlar la reproducción
+  setPlayIcon(true);
+}
+
+function stopHLS(){
+  if(hlsInstance){ hlsInstance.destroy(); hlsInstance = null; }
+}
+
+function bindVideoEvents(){
+  vid.onplay = ()=>{ setPlayIcon(true); isPlaying = true; hideSpinner(); };
+  vid.onpause = ()=>{ setPlayIcon(false); isPlaying = false; };
+  vid.onwaiting = ()=>{ showSpinner(); };
+  vid.oncanplay = ()=>{ hideSpinner(); hideLoading(); };
+  vid.ontimeupdate = ()=>{
+    updateProgress();
+    // Skip intro: mostrar a los 15s
+    if(!skipShown && vid.currentTime > 15){
+      $('ap-skip').classList.add('visible');
+      skipShown = true;
+    }
+    // Siguiente episodio: cuando quedan 30s
+    if(vid.duration && vid.duration > 60 && (vid.duration - vid.currentTime) <= 30){
+      const isTv = state.mediaType === 'tv' || state.mediaType === 'anime';
+      if(isTv && !$('ap-next-overlay').classList.contains('show')){
+        showNextOverlay();
+      }
+    }
+  };
+  vid.onended = ()=>{
+    setPlayIcon(false);
+    const isTv = state.mediaType === 'tv' || state.mediaType === 'anime';
+    if(isTv) showNextOverlay();
+  };
+  vid.onprogress = ()=>{ updateBuffer(); };
+  vid.onerror = ()=>{
+    const code = vid.error ? vid.error.code : '?';
+    showError(`Error al reproducir el video (código ${code}).`);
+  };
+  vid.onvolumechange = ()=>{ updateVolUI(); };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CONTROLES
+// ═══════════════════════════════════════════════════════════════
+function setupControls(){
+  $('ap-back').onclick = ()=>{ goBack(); };
+  $('ap-play').onclick = ()=>{ togglePlay(); };
+  $('ap-rw').onclick = ()=>{ seek(-10); };
+  $('ap-ff').onclick = ()=>{ seek(10); };
+  $('ap-mute').onclick = ()=>{ toggleMute(); };
+  $('ap-fs').onclick = ()=>{ toggleFullscreen(); };
+  $('ap-skip').onclick = ()=>{ seek(90); $('ap-skip').classList.remove('visible'); };
+  $('ap-next-ep').onclick = ()=>{ nextEpisode(); };
+  $('ap-next-btn').onclick = ()=>{ nextEpisode(); hideNextOverlay(); };
+  $('ap-ep-toggle').onclick = ()=>{ toggleEpPanel(); };
+  $('ap-ep-close').onclick = ()=>{ $('ap-ep-panel').classList.remove('open'); };
+  $('ap-error-retry').onclick = ()=>{ hideError(); if(retryUrl) loadMedia(retryUrl); };
+
+  // Vol range
+  $('ap-vol-range').addEventListener('input', e=>{
+    volume = e.target.value / 100;
+    if(vid) vid.volume = volume;
+    isMuted = false;
+    if(vid) vid.muted = false;
+    updateVolUI();
+    showVolToast();
+  });
+
+  // Progress bar click & drag
+  const prog = $('ap-progress');
+  prog.addEventListener('click', e=>{
+    if(!vid || !vid.duration) return;
+    const pct = e.offsetX / prog.offsetWidth;
+    vid.currentTime = vid.duration * pct;
+  });
+  prog.addEventListener('mousedown', e=>{
+    isSeeking = true;
+    seekByMouse(e, prog);
+  });
+  document.addEventListener('mousemove', e=>{
+    if(!isSeeking) return;
+    seekByMouse(e, prog);
+  });
+  document.addEventListener('mouseup', ()=>{ isSeeking = false; });
+
+  // Mostrar/ocultar overlay al mover mouse
+  wrap.addEventListener('mousemove', ()=>{ showOverlay(); });
+  wrap.addEventListener('click', e=>{
+    // Click en el área de video toggle play (no en botones)
+    if(e.target === vid || e.target.id === 'ap-video' || e.target.id === 'player-wrap'){
+      togglePlay();
+    }
+  });
+
+  // Vol inicial
+  $('ap-vol-range').value = volume * 100;
+  $('ap-vol-fill').style.width = (volume*100)+'%';
+}
+
+function seekByMouse(e, bar){
+  if(!vid || !vid.duration) return;
+  const rect = bar.getBoundingClientRect();
+  const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  vid.currentTime = vid.duration * pct;
+}
+
+function togglePlay(){
+  const isIframe = ifr.classList.contains('active');
+  if(isIframe){ showOverlay(); return; }
+  if(!vid.src && !hlsInstance) return;
+  if(vid.paused){ vid.play(); popCenterIcon(true); }
+  else { vid.pause(); popCenterIcon(false); }
+  showOverlay();
+}
+
+function seek(sec){
+  if(!vid || !vid.duration) return;
+  vid.currentTime = Math.max(0, Math.min(vid.currentTime + sec, vid.duration));
+  showToast(`${sec > 0 ? '+' : ''}${sec}s`);
+  showOverlay();
+}
+
+function toggleMute(){
+  if(!vid.src && !hlsInstance) return;
+  isMuted = !isMuted;
+  vid.muted = isMuted;
+  updateVolUI();
+  showVolToast();
+}
+
+function changeVolume(delta){
+  volume = Math.max(0, Math.min(1, volume + delta));
+  if(vid){ vid.volume = volume; vid.muted = false; }
+  isMuted = false;
+  $('ap-vol-range').value = volume * 100;
+  updateVolUI();
+  showVolToast();
+}
+
+function toggleFullscreen(){
+  if(!document.fullscreenElement){
+    wrap.requestFullscreen().catch(()=>{});
+    $('ap-fs-icon').innerHTML='<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 0 2-2h3M3 16h3a2 2 0 0 0 2 2v3"/>';
+  } else {
+    document.exitFullscreen();
+    $('ap-fs-icon').innerHTML='<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>';
+  }
+}
+
+function goBack(){
+  stopHLS();
+  vid.pause();
+  // Notificar a la app padre
+  if(window.opener) window.opener.postMessage({ type: 'ASTRO_CLOSE' }, '*');
+  if(window.parent !== window) window.parent.postMessage({ type: 'ASTRO_CLOSE' }, '*');
+  // Si se abrió como ventana
+  try { window.close(); } catch(e) {}
+  // Fallback: ir atrás en historial
+  setTimeout(()=>{ history.back(); }, 100);
+}
+
+// ─── TECLADO / CONTROL REMOTO ──────────────────────────────────
+function setupKeyboard(){
+  document.addEventListener('keydown', e=>{
+    const tag = document.activeElement.tagName.toLowerCase();
+    if(tag === 'input') return;
+
+    switch(e.key){
+      case ' ':
+      case 'k':
+      case 'MediaPlayPause':
+        e.preventDefault(); togglePlay(); break;
+
+      case 'ArrowLeft':
+      case 'MediaRewind':
+        e.preventDefault(); seek(-10); break;
+
+      case 'ArrowRight':
+      case 'MediaFastForward':
+        e.preventDefault(); seek(10); break;
+
+      case 'ArrowUp':
+        e.preventDefault(); changeVolume(0.1); break;
+
+      case 'ArrowDown':
+        e.preventDefault(); changeVolume(-0.1); break;
+
+      case 'm':
+      case 'M':
+        toggleMute(); break;
+
+      case 'f':
+      case 'F':
+        toggleFullscreen(); break;
+
+      case 'Escape':
+      case 'Backspace':
+      case 'GoBack':
+        goBack(); break;
+
+      case 'e':
+      case 'E':
+        toggleEpPanel(); break;
+
+      case 'n':
+      case 'N':
+        nextEpisode(); break;
+
+      case 's':
+      case 'S':
+        showToast('Subtítulos — Configura en el embed'); break;
+
+      case 'Enter':
+        // Enter en botón enfocado = click
+        if(document.activeElement && document.activeElement.id !== 'ap-progress'){
+          document.activeElement.click();
+        } else {
+          togglePlay();
+        }
+        break;
+
+      default:
+        showOverlay();
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EPISODIOS
+// ═══════════════════════════════════════════════════════════════
+async function loadEpPanel(){
+  const panel = $('ap-ep-list');
+  const tabs = $('ap-season-tabs');
+  panel.innerHTML = '<div style="padding:20px;color:rgba(255,255,255,0.4);font-size:13px;">Cargando episodios...</div>';
+  tabs.innerHTML = '';
+
+  if(!state.tmdbId){ panel.innerHTML = ''; return; }
+
+  // Obtener temporadas de TMDB
+  try {
+    const TMDB_KEY = '1b7425c1a31c69c428bd47f08df18d18';
+    const res = await fetch(`https://api.themoviedb.org/3/tv/${state.tmdbId}?api_key=${TMDB_KEY}&language=es-MX`);
+    const show = await res.json();
+    const seasons = (show.seasons || []).filter(s => s.season_number > 0);
+
+    // Season tabs
+    seasons.forEach(s => {
+      const tab = document.createElement('button');
+      tab.className = 'ap-season-tab' + (s.season_number === state.season ? ' active' : '');
+      tab.textContent = `T${s.season_number}`;
+      tab.onclick = ()=>{
+        state.season = s.season_number;
+        document.querySelectorAll('.ap-season-tab').forEach(t=>t.classList.remove('active'));
+        tab.classList.add('active');
+        loadSeasonEps(s.season_number);
+      };
+      tabs.appendChild(tab);
+    });
+
+    loadSeasonEps(state.season);
+  } catch(e){
+    panel.innerHTML = '<div style="padding:20px;color:rgba(255,255,255,0.4);">No se pudo cargar episodios.</div>';
+  }
+}
+
+async function loadSeasonEps(seasonNum){
+  const panel = $('ap-ep-list');
+  panel.innerHTML = '<div style="padding:20px;color:rgba(255,255,255,0.4);font-size:13px;">Cargando...</div>';
+
+  try {
+    const TMDB_KEY = '1b7425c1a31c69c428bd47f08df18d18';
+    const res = await fetch(`https://api.themoviedb.org/3/tv/${state.tmdbId}/season/${seasonNum}?api_key=${TMDB_KEY}&language=es-MX`);
+    const data = await res.json();
+    state.episodes = data.episodes || [];
+    renderEpList();
+  } catch(e){
+    panel.innerHTML = '<div style="padding:20px;color:rgba(255,255,255,0.4);">Error al cargar episodios.</div>';
+  }
+}
+
+function renderEpList(){
+  const panel = $('ap-ep-list');
+  panel.innerHTML = '';
+  state.episodes.forEach((ep, i)=>{
+    const hasUrl = state.seasonsMap &&
+      state.seasonsMap[state.season] &&
+      state.seasonsMap[state.season][ep.episode_number] &&
+      state.seasonsMap[state.season][ep.episode_number].trim() !== '';
+
+    const el = document.createElement('div');
+    el.className = 'ap-ep-item' +
+      (ep.episode_number === state.episode ? ' current' : '') +
+      (hasUrl ? ' has-url' : '');
+    el.tabIndex = 0;
+
+    const thumb = ep.still_path
+      ? `https://image.tmdb.org/t/p/w185${ep.still_path}`
+      : '';
+
+    el.innerHTML = `
+      <div class="ap-ep-num">${ep.episode_number}</div>
+      ${thumb ? `<img class="ap-ep-thumb" src="${thumb}" alt="" loading="lazy">` : '<div class="ap-ep-thumb" style="background:rgba(255,255,255,0.05);border-radius:5px;"></div>'}
+      <div class="ap-ep-info">
+        <div class="ap-ep-name">${ep.name || `Episodio ${ep.episode_number}`}</div>
+        <div class="ap-ep-dur">${ep.runtime || 23} min</div>
+      </div>
+      ${hasUrl ? '<div class="ap-ep-dot"></div>' : ''}
+    `;
+
+    el.onclick = ()=>{ playEpisode(i, ep.episode_number); };
+    el.onkeydown = e=>{ if(e.key==='Enter') playEpisode(i, ep.episode_number); };
+    panel.appendChild(el);
+  });
+
+  // Scroll al episodio actual
+  const cur = panel.querySelector('.current');
+  if(cur) cur.scrollIntoView({ block: 'nearest' });
+}
+
+function getEpUrl(season, epNum){
+  if(state.seasonsMap){
+    const s = state.seasonsMap[season];
+    if(s && s[epNum] && s[epNum].trim() !== '') return s[epNum].trim();
+  }
+  // Fallback vidsrc
+  return `https://vidsrc.xyz/embed/tv/${state.tmdbId}/${season}/${epNum}`;
+}
+
+function playEpisode(idx, epNum){
+  state.epIdx = idx;
+  state.episode = epNum;
+  const ep = state.episodes[idx];
+  const url = getEpUrl(state.season, epNum);
+  state.url = url;
+
+  $('ap-ep-label').textContent = `Temporada ${state.season} · Episodio ${epNum}`;
+  if(ep) $('ap-title').textContent = state.title;
+
+  loadMedia(url);
+  renderEpList();
+  $('ap-ep-panel').classList.remove('open');
+  hideNextOverlay();
+
+  // Scroll al episodio
+  setTimeout(()=>{
+    const cur = $('ap-ep-list').querySelector('.current');
+    if(cur) cur.scrollIntoView({ block: 'nearest' });
+  }, 100);
+}
+
+function nextEpisode(){
+  const nextIdx = state.epIdx + 1;
+  if(nextIdx >= state.episodes.length){
+    showToast('No hay más episodios');
+    return;
+  }
+  const nextEp = state.episodes[nextIdx];
+  if(nextEp) playEpisode(nextIdx, nextEp.episode_number);
+}
+
+function toggleEpPanel(){
+  $('ap-ep-panel').classList.toggle('open');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OVERLAY / UI
+// ═══════════════════════════════════════════════════════════════
+function showOverlay(){
+  overlay.classList.remove('hidden');
+  overlayVisible = true;
+  clearTimeout(hideTimer);
+  if(isPlaying){
+    hideTimer = setTimeout(()=>{ overlay.classList.add('hidden'); overlayVisible = false; }, 4000);
+  }
+}
+
+function setPlayIcon(playing){
+  const icon = $('ap-play-icon');
+  isPlaying = playing;
+  if(playing){
+    icon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+  } else {
+    icon.innerHTML = '<path d="M5 3l14 9-14 9V3z"/>';
+  }
+}
+
+function popCenterIcon(playing){
+  const el = $('ap-center-icon');
+  const svg = $('ap-center-svg');
+  svg.innerHTML = playing
+    ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
+    : '<path d="M5 3l14 9-14 9V3z"/>';
+  el.classList.add('pop');
+  setTimeout(()=>{ el.classList.remove('pop'); }, 600);
+}
+
+function updateProgress(){
+  if(!vid || !vid.duration) return;
+  const pct = (vid.currentTime / vid.duration) * 100;
+  $('ap-progress-fill').style.width = pct + '%';
+  $('ap-time-cur').textContent = fmtTime(vid.currentTime);
+  $('ap-time-dur').textContent = fmtTime(vid.duration);
+}
+
+function updateBuffer(){
+  if(!vid || !vid.duration || !vid.buffered.length) return;
+  const pct = (vid.buffered.end(vid.buffered.length-1) / vid.duration) * 100;
+  $('ap-progress-buf').style.width = pct + '%';
+}
+
+function updateVolUI(){
+  const pct = isMuted ? 0 : Math.round(volume * 100);
+  $('ap-vol-range').value = isMuted ? 0 : volume * 100;
+  $('ap-vol-fill').style.width = pct + '%';
+  $('ap-vol-pct').textContent = pct + '%';
+  $('ap-vol-icon2').textContent = isMuted || volume === 0 ? '🔇' : volume < 0.4 ? '🔉' : '🔊';
+  const icon = $('ap-vol-icon');
+  if(isMuted || volume === 0){
+    icon.innerHTML = '<path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2"/><line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2"/>';
+  } else {
+    icon.innerHTML = '<path d="M11 5L6 9H2v6h4l5 4V5zm5.54 3.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>';
+  }
+}
+
+function showToast(msg){
+  const t = $('ap-toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(()=>{ t.classList.remove('show'); }, 1400);
+}
+
+function showVolToast(){
+  const t = $('ap-vol-toast');
+  t.classList.add('show');
+  clearTimeout(window._volTimer);
+  window._volTimer = setTimeout(()=>{ t.classList.remove('show'); }, 1600);
+}
+
+function showSpinner(){ $('ap-spinner').classList.add('show'); }
+function hideSpinner(){ $('ap-spinner').classList.remove('show'); }
+function showLoading(){ $('ap-loading').classList.remove('hide'); }
+function hideLoading(){ $('ap-loading').classList.add('hide'); }
+function showError(msg){ $('ap-error').classList.add('show'); $('ap-error-msg').textContent = msg; hideLoading(); }
+function hideError(){ $('ap-error').classList.remove('show'); }
+
+function showNextOverlay(){
+  const nextEp = state.episodes[state.epIdx + 1];
+  if(!nextEp) return;
+  $('ap-next-overlay').classList.add('show');
+  $('ap-next-title').textContent = nextEp.name || `Episodio ${nextEp.episode_number}`;
+  $('ap-next-ep-label').textContent = `T${state.season} · E${nextEp.episode_number}`;
+  if(nextEp.still_path){
+    $('ap-next-thumb').src = `https://image.tmdb.org/t/p/w300${nextEp.still_path}`;
+  }
+  // Countdown
+  neoCountdown = 12;
+  $('ap-neo-fill').style.width = '100%';
+  clearInterval(neoTimer);
+  neoTimer = setInterval(()=>{
+    neoCountdown--;
+    $('ap-neo-fill').style.width = (neoCountdown / 12 * 100) + '%';
+    if(neoCountdown <= 0){ clearInterval(neoTimer); nextEpisode(); hideNextOverlay(); }
+  }, 1000);
+}
+
+function hideNextOverlay(){
+  $('ap-next-overlay').classList.remove('show');
+  clearInterval(neoTimer);
+}
+
+function fmtTime(s){
+  if(!s || isNaN(s)) return '0:00';
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if(h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+// ─── ARRANCAR ──────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
